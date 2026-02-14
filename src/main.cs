@@ -1,11 +1,12 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 
 class Program
 {
     static readonly HashSet<string> Builtins = new(StringComparer.Ordinal)
     {
-        "echo", "exit", "quit", "type", "pwd"
+        "echo", "exit", "quit", "type", "pwd", "cd"
     };
 
     static void Main()
@@ -33,6 +34,7 @@ class Program
                 "type" => () => HandleType(args),
                 "exit" or "quit" => () => run = false,
                 "pwd" => () => HandlePwd(),
+                "cd" => () => HandleCd(args),
                 _ => () => HandleExternalCommand(cmd, args)
             };
 
@@ -74,6 +76,20 @@ class Program
     {
         Console.WriteLine(Directory.GetCurrentDirectory());
         return;
+    }
+
+    static void HandleCd(string path)
+    {
+        try
+        {
+            Directory.SetCurrentDirectory(path);
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            Console.WriteLine($"cd: {path}: No such file or directory");
+            return;
+        }
     }
 
     static void HandleExternalCommand(string command, string arguments)
