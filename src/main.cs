@@ -27,22 +27,78 @@ class Program
                 continue;
             }
 
-            string cmd = parsedArgs[0].ToLowerInvariant();
-            var args = parsedArgs.Skip(1).ToList();
+            // Check for output redirection
+            string? redirectFile = null;
+            int redirectIndex = -1;
 
-            Action action = cmd switch
+            for (int i = 0; i < parsedArgs.Count; i++)
             {
-                "" => () => { }
-                ,
-                "echo" => () => HandleEcho(args),
-                "type" => () => HandleType(args),
-                "exit" or "quit" => () => run = false,
-                "pwd" => () => HandlePwd(),
-                "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
-                _ => () => HandleExternalCommand(cmd, args)
-            };
+                if (parsedArgs[i] == ">" || parsedArgs[i] == "1>")
+                {
+                    redirectIndex = i;
+                    if (i + 1 < parsedArgs.Count)
+                    {
+                        redirectFile = parsedArgs[i + 1];
+                    }
+                    break;
+                }
+            }
 
-            action();
+            // Remove redirection operator and filename from args
+            List<string> actualArgs = parsedArgs;
+            if (redirectIndex >= 0)
+            {
+                actualArgs = parsedArgs.Take(redirectIndex).ToList();
+            }
+
+            if (actualArgs.Count == 0)
+            {
+                continue;
+            }
+
+            string cmd = actualArgs[0].ToLowerInvariant();
+            var args = actualArgs.Skip(1).ToList();
+
+            bool isBuiltin = Builtins.Contains(cmd) || cmd == "exit" || cmd == "quit";
+
+            // Set up redirection if needed
+            TextWriter? originalOut = null;
+            FileStream? fileStream = null;
+            StreamWriter? fileWriter = null;
+
+            try
+            {
+                if (redirectFile != null && isBuiltin)
+                {
+                    originalOut = Console.Out;
+                    fileStream = new FileStream(redirectFile, FileMode.Create, FileAccess.Write);
+                    fileWriter = new StreamWriter(fileStream) { AutoFlush = true };
+                    Console.SetOut(fileWriter);
+                }
+
+                Action action = cmd switch
+                {
+                    "" => () => { },
+                    "echo" => () => HandleEcho(args),
+                    "type" => () => HandleType(args),
+                    "exit" or "quit" => () => run = false,
+                    "pwd" => () => HandlePwd(),
+                    "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
+                    _ => () => HandleExternalCommand(cmd, args, redirectFile)
+                };
+
+                action();
+            }
+            finally
+            {
+                // Restore original stdout
+                if (originalOut != null)
+                {
+                    Console.SetOut(originalOut);
+                    fileWriter?.Dispose();
+                    fileStream?.Dispose();
+                }
+            }
         }
     }
     
@@ -133,14 +189,12 @@ class Program
         if (target.Length == 0)
             return;
 
-        // 1) Builtin check
         if (Builtins.Contains(target))
         {
             Console.WriteLine($"{target} is a shell builtin");
             return;
         }
 
-        // 2) Search PATH for an executable
         string? fullPath = FindExecutableInPath(target);
 
         if (fullPath is not null)
@@ -155,12 +209,10 @@ class Program
     static void HandlePwd()
     {
         Console.WriteLine(Directory.GetCurrentDirectory());
-        return;
     }
 
     static void HandleCd(string path)
     {
-
         if (path == "~")
         {
             string? homeDirectory = Environment.GetEnvironmentVariable("HOME");
@@ -173,16 +225,14 @@ class Program
         try
         {
             Directory.SetCurrentDirectory(path);
-            return;
         }
         catch (DirectoryNotFoundException)
         {
             Console.WriteLine($"cd: {path}: No such file or directory");
-            return;
         }
     }
 
-    static void HandleExternalCommand(string command, List<string> args)
+    static void HandleExternalCommand(string command, List<string> args, string? redirectFile = null)
     {
         string? executablePath = FindExecutableInPath(command);
 
@@ -199,7 +249,8 @@ class Program
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
-                    UseShellExecute = false
+                    UseShellExecute = false,
+                    RedirectStandardOutput = redirectFile != null
                 };
 
                 foreach (var arg in args)
@@ -210,6 +261,11 @@ class Program
                 using var process = Process.Start(startInfo);
                 if (process is not null)
                 {
+                    if (redirectFile != null && process.StandardOutput != null)
+                    {
+                        string output = process.StandardOutput.ReadToEnd();
+                        File.WriteAllText(redirectFile, output);
+                    }
                     process.WaitForExit();
                 }
             }
@@ -220,6 +276,12 @@ class Program
                 var escapedArgs = string.Join(" ", args.Select(EscapeShellArgument));
                 
                 var shellCommand = $"exec -a {escapedCommand} {escapedPath} {escapedArgs}".TrimEnd();
+                
+                if (redirectFile != null)
+                {
+                    var escapedRedirect = EscapeShellArgument(redirectFile);
+                    shellCommand += $" > {escapedRedirect}";
+                }
                 
                 var startInfo = new ProcessStartInfo
                 {
@@ -237,7 +299,7 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error executing {command}: {ex.Message}");
+            Console.Error.WriteLine($"Error executing {command}: {ex.Message}");
         }
     }
 
@@ -263,7 +325,6 @@ class Program
             if (dir.Length == 0 || !Directory.Exists(dir))
                 continue;
 
-            // On Windows, consider PATHEXT when command has no extension
             if (OperatingSystem.IsWindows())
             {
                 foreach (var candidate in GetWindowsCandidates(dir, commandName))
@@ -285,14 +346,12 @@ class Program
 
     static IEnumerable<string> GetWindowsCandidates(string dir, string commandName)
     {
-        // If user typed an extension (e.g. "git.exe"), try it directly
         if (Path.HasExtension(commandName))
         {
             yield return Path.Combine(dir, commandName);
             yield break;
         }
 
-        // Otherwise try PATHEXT (e.g. .EXE;.BAT;.CMD;.COM)
         var pathext = Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD;.COM";
         foreach (var extRaw in pathext.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
