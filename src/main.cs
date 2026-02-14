@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 class Program
 {
@@ -80,6 +79,16 @@ class Program
 
     static void HandleCd(string path)
     {
+
+        if (path == "~")
+        {
+            string? homeDirectory = Environment.GetEnvironmentVariable("HOME");
+            if (homeDirectory is not null)
+            {
+                path = homeDirectory;
+            }
+        }
+
         try
         {
             Directory.SetCurrentDirectory(path);
