@@ -1,4 +1,6 @@
+using System.Data.Common;
 using System.Diagnostics;
+using System.Runtime.Serialization;
 using System.Text;
 
 class Program
@@ -164,11 +166,11 @@ class Program
     static string? ReadLineWithTabCompletion()
     {
         var input = new StringBuilder();
-        
+
         while (true)
         {
             var keyInfo = Console.ReadKey(intercept: true);
-            
+
             if (keyInfo.Key == ConsoleKey.Enter)
             {
                 Console.WriteLine();
@@ -177,26 +179,29 @@ class Program
             else if (keyInfo.Key == ConsoleKey.Tab)
             {
                 string currentInput = input.ToString();
-                
+
                 if (!currentInput.Contains(' '))
                 {
-                    var matches = AutocompleteCommands
-                        .Where(cmd => cmd.StartsWith(currentInput, StringComparison.OrdinalIgnoreCase))
-                        .ToList();
+                    var allCompletions = GetCompletionMatches(currentInput);
 
-                    if (matches.Count == 1)
+                    if (allCompletions.Count == 1)
                     {
+                        // Move cursor to beginning of line (after prompt)
                         Console.Write("\r$ ");
 
+                        // Clear the rest of the line
                         Console.Write(new string(' ', input.Length));
 
+                        // Move back to beginning again
                         Console.Write("\r$ ");
 
-                        string completion = matches[0];
+                        // Complete the command
+                        string completion = allCompletions[0];
                         input.Clear();
                         input.Append(completion);
-                        input.Append(' ');
+                        input.Append(' '); // Add trailing space
 
+                        // Write the completed command to console
                         Console.Write(completion + " ");
                     }
                     else
@@ -220,6 +225,73 @@ class Program
                 Console.Write(keyInfo.KeyChar);
             }
         }
+    }
+    
+    static List<string> GetCompletionMatches(string prefix)
+    {
+        var matches = new HashSet<string>();
+
+        foreach (var cmd in AutocompleteCommands)
+        {
+            if (cmd.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(cmd);
+            }
+        }
+
+        string? pathVar = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathVar))
+        {
+            foreach (var rawDir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var dir = rawDir.Trim();
+
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+                    continue;
+
+                try
+                {
+                    var files = Directory.GetFiles(dir);
+
+                    foreach (var file in files)
+                    {
+                        string fileName = Path.GetFileName(file);
+
+                        if (fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && HasExecutePermission(file))
+                        {
+                            if (OperatingSystem.IsWindows())
+                            {
+                                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                                string ext = Path.GetExtension(fileName).ToUpperInvariant();
+
+                                var pathext = Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD;.COM";
+                                if (pathext.Contains(ext, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    if (nameWithoutExt.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        matches.Add(nameWithoutExt);
+                                    }
+                                }
+
+                                matches.Add(fileName);
+                            }
+                            else
+                            {
+                                // on unix - return the filename as is
+                                matches.Add(fileName);
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // ignore errors reading directory
+                    continue;
+                }
+            }
+        }
+
+        return matches.OrderBy(m => m).ToList();
     }
     
     static List<string> ParseCommand(string input)
