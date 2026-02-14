@@ -166,11 +166,12 @@ class Program
     static string? ReadLineWithTabCompletion()
     {
         var input = new StringBuilder();
-
+        bool lastKeyWasTab = false;
+        
         while (true)
         {
             var keyInfo = Console.ReadKey(intercept: true);
-
+            
             if (keyInfo.Key == ConsoleKey.Enter)
             {
                 Console.WriteLine();
@@ -179,36 +180,58 @@ class Program
             else if (keyInfo.Key == ConsoleKey.Tab)
             {
                 string currentInput = input.ToString();
-
+                
                 if (!currentInput.Contains(' '))
                 {
                     var allCompletions = GetCompletionMatches(currentInput);
-
+                    
                     if (allCompletions.Count == 1)
                     {
                         // Move cursor to beginning of line (after prompt)
                         Console.Write("\r$ ");
-
+                        
                         // Clear the rest of the line
                         Console.Write(new string(' ', input.Length));
-
+                        
                         // Move back to beginning again
                         Console.Write("\r$ ");
-
+                        
                         // Complete the command
                         string completion = allCompletions[0];
                         input.Clear();
                         input.Append(completion);
                         input.Append(' '); // Add trailing space
-
+                        
                         // Write the completed command to console
                         Console.Write(completion + " ");
+                        
+                        lastKeyWasTab = false;
+                    }
+                    else if (allCompletions.Count > 1)
+                    {
+                        if (lastKeyWasTab)
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine(string.Join("  ", allCompletions));
+                            Console.Write("$ " + currentInput);
+                            
+                            lastKeyWasTab = false;
+                        }
+                        else
+                        {
+                            Console.Write("\x07");
+                            lastKeyWasTab = true;
+                        }
                     }
                     else
                     {
-                        Console.WriteLine(input);
-                        Console.WriteLine("\x07");
+                        Console.Write("\x07");
+                        lastKeyWasTab = false;
                     }
+                }
+                else
+                {
+                    lastKeyWasTab = false;
                 }
             }
             else if (keyInfo.Key == ConsoleKey.Backspace)
@@ -218,11 +241,17 @@ class Program
                     input.Length--;
                     Console.Write("\b \b");
                 }
+                lastKeyWasTab = false;
             }
             else if (!char.IsControl(keyInfo.KeyChar))
             {
                 input.Append(keyInfo.KeyChar);
                 Console.Write(keyInfo.KeyChar);
+                lastKeyWasTab = false;
+            }
+            else
+            {
+                lastKeyWasTab = false;
             }
         }
     }
