@@ -6,10 +6,17 @@ class Program
 
         while (run)
         {
-        Console.Write("$ ");
+            Console.Write("$ ");
 
-        string command = Console.ReadLine();
-        Console.WriteLine($"{command}: command not found");
+            string? command = Console.ReadLine();
+
+            if (command == "exit")
+            {
+                run = false;
+                break;
+            }
+        
+            Console.WriteLine($"{command}: command not found");
         }
     }
 }
