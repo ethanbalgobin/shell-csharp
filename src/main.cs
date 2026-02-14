@@ -22,6 +22,7 @@ class Program
                 "" => () => { }
                 ,
                 "echo" => () => HandleEcho(args),
+                "type" => () => HandleType(args),
                 "exit" or "quit" => () => run = false,
                 _ => () => Console.WriteLine($"{cmd}: command not found")
             };
@@ -33,5 +34,18 @@ class Program
     static void HandleEcho(string statement)
     {
         Console.WriteLine(statement);
+    }
+
+    static void HandleType(string command)
+    {
+        switch (command)
+        {
+            case "echo" or "exit" or "type":
+                Console.WriteLine($"{command} is a shell builtin");
+                break;
+            default:
+                Console.WriteLine($"{command}: not found");
+                break;
+        }
     }
 }
