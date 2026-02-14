@@ -1,7 +1,4 @@
-using System.Buffers;
-using System.Data.Common;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text;
 
 class Program
@@ -54,20 +51,21 @@ class Program
         var result = new List<string>();
         var currentArg = new StringBuilder();
         bool inSingleQuote = false;
+        bool inDoubleQuote = false;
 
         for (int i = 0; i < input.Length; i++)
         {
             char c = input[i];
 
-            if (c == '\'' && !inSingleQuote)
+            if (c == '\'' && !inDoubleQuote)
             {
-                inSingleQuote = true;
+                inSingleQuote = !inSingleQuote;
             }
-            else if (c == '\'' && inSingleQuote)
+            else if (c == '"' && !inSingleQuote)
             {
-                inSingleQuote = false;
+                inDoubleQuote = !inDoubleQuote;
             }
-            else if (char.IsWhiteSpace(c) && !inSingleQuote)
+            else if (char.IsWhiteSpace(c) && !inSingleQuote && !inDoubleQuote)
             {
                 if (currentArg.Length > 0)
                 {
