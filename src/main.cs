@@ -57,7 +57,19 @@ class Program
         {
             char c = input[i];
 
-            if (c == '\'' && !inDoubleQuote)
+            if (c == '\\' && !inSingleQuote && !inDoubleQuote)
+            {
+                if (i + 1 < input.Length)
+                {
+                    i++;
+                    currentArg.Append(input[i]);
+                }
+                else
+                {
+                    currentArg.Append(c);
+                }
+            }
+            else if (c == '\'' && !inDoubleQuote)
             {
                 inSingleQuote = !inSingleQuote;
             }
