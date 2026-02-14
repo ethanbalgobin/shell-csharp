@@ -5,7 +5,7 @@ class Program
 {
     static readonly HashSet<string> Builtins = new(StringComparer.Ordinal)
     {
-        "echo", "exit", "quit", "type"
+        "echo", "exit", "quit", "type", "pwd"
     };
 
     static void Main()
@@ -27,11 +27,13 @@ class Program
 
             Action action = cmd switch
             {
-                ""                 => () => { },
-                "echo"             => () => HandleEcho(args),
-                "type"             => () => HandleType(args),
-                "exit" or "quit"   => () => run = false,
-                _                  => () => HandleExternalCommand(cmd, args)
+                "" => () => { }
+                ,
+                "echo" => () => HandleEcho(args),
+                "type" => () => HandleType(args),
+                "exit" or "quit" => () => run = false,
+                "pwd" => () => HandlePwd(),
+                _ => () => HandleExternalCommand(cmd, args)
             };
 
             action();
@@ -66,6 +68,12 @@ class Program
         }
 
         Console.WriteLine($"{target}: not found");
+    }
+
+    static void HandlePwd()
+    {
+        Console.WriteLine(Directory.GetCurrentDirectory());
+        return;
     }
 
     static void HandleExternalCommand(string command, string arguments)
