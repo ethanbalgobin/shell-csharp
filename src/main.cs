@@ -183,21 +183,26 @@ class Program
                     var matches = AutocompleteCommands
                         .Where(cmd => cmd.StartsWith(currentInput, StringComparison.OrdinalIgnoreCase))
                         .ToList();
-                    
+
                     if (matches.Count == 1)
                     {
                         Console.Write("\r$ ");
-                        
+
                         Console.Write(new string(' ', input.Length));
-                        
+
                         Console.Write("\r$ ");
-                        
+
                         string completion = matches[0];
                         input.Clear();
                         input.Append(completion);
                         input.Append(' ');
-                        
+
                         Console.Write(completion + " ");
+                    }
+                    else
+                    {
+                        Console.WriteLine(input);
+                        Console.WriteLine("\x07");
                     }
                 }
             }
