@@ -8,15 +8,30 @@ class Program
         {
             Console.Write("$ ");
 
-            string? command = Console.ReadLine();
+            string? input = Console.ReadLine();
+            if (input is null) break; // Ctrl+Z/Ctrl+D ends input
 
-            if (command == "exit")
+            input = input.Trim();
+
+            var parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            string cmd = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
+            string args = parts.Length == 2 ? parts[1] : "";
+
+            Action action = cmd switch
             {
-                run = false;
-                break;
-            }
-        
-            Console.WriteLine($"{command}: command not found");
+                "" => () => { }
+                ,
+                "echo" => () => HandleEcho(args),
+                "exit" or "quit" => () => run = false,
+                _ => () => Console.WriteLine($"{cmd}: command not found")
+            };
+
+            action();
         }
+    }
+
+    static void HandleEcho(string statement)
+    {
+        Console.WriteLine(statement);
     }
 }
