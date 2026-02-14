@@ -1,5 +1,8 @@
 using System.Buffers;
+using System.Data.Common;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 
 class Program
 {
@@ -17,13 +20,18 @@ class Program
             Console.Write("$ ");
 
             string? input = Console.ReadLine();
-            if (input is null) break; 
+            if (input is null) break;
 
             input = input.Trim();
 
-            var parts = input.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-            string cmd  = parts.Length > 0 ? parts[0].ToLowerInvariant() : "";
-            string args = parts.Length == 2 ? parts[1] : "";
+            var parsedArgs = ParseCommand(input);
+            if (parsedArgs.Count == 0)
+            {
+                continue;
+            }
+
+            string cmd = parsedArgs[0].ToLowerInvariant();
+            var args = parsedArgs.Skip(1).ToList();
 
             Action action = cmd switch
             {
@@ -33,22 +41,68 @@ class Program
                 "type" => () => HandleType(args),
                 "exit" or "quit" => () => run = false,
                 "pwd" => () => HandlePwd(),
-                "cd" => () => HandleCd(args),
+                "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
                 _ => () => HandleExternalCommand(cmd, args)
             };
 
             action();
         }
     }
-
-    static void HandleEcho(string statement)
+    
+    static List<string> ParseCommand(string input)
     {
-        Console.WriteLine(statement);
+        var result = new List<string>();
+        var currentArg = new StringBuilder();
+        bool inSingleQuote = false;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            char c = input[i];
+
+            if (c == '\'' && !inSingleQuote)
+            {
+                inSingleQuote = true;
+            }
+            else if (c == '\'' && inSingleQuote)
+            {
+                inSingleQuote = false;
+            }
+            else if (char.IsWhiteSpace(c) && !inSingleQuote)
+            {
+                if (currentArg.Length > 0)
+                {
+                    result.Add(currentArg.ToString());
+                    currentArg.Clear();
+                }
+            }
+            else
+            {
+                currentArg.Append(c);
+            }
+        }
+
+        if (currentArg.Length > 0)
+        {
+            result.Add(currentArg.ToString());
+        }
+
+        return result;
     }
 
-    static void HandleType(string command)
+    static void HandleEcho(List<string> statement)
     {
-        var target = command.Trim();
+        Console.WriteLine(string.Join(" ", statement));
+    }
+
+    static void HandleType(List<string> args)
+    {
+        if (args.Count == 0)
+        {
+            return;
+        }
+
+        var target = args[0];
+
         if (target.Length == 0)
             return;
 
@@ -101,7 +155,7 @@ class Program
         }
     }
 
-    static void HandleExternalCommand(string command, string arguments)
+    static void HandleExternalCommand(string command, List<string> args)
     {
         string? executablePath = FindExecutableInPath(command);
 
@@ -118,9 +172,13 @@ class Program
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = executablePath,
-                    Arguments = arguments,
                     UseShellExecute = false
                 };
+
+                foreach (var arg in args)
+                {
+                    startInfo.ArgumentList.Add(arg);
+                }
 
                 using var process = Process.Start(startInfo);
                 if (process is not null)
@@ -130,10 +188,13 @@ class Program
             }
             else
             {
+                var escapedArgs = args.Select(arg => $"'{arg.Replace("'", "'\\''")}'");
+                var allArgs = string.Join(" ", escapedArgs);
+
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = "/bin/sh",
-                    Arguments = $"-c \"exec -a '{command}' '{executablePath}' {arguments}\"",
+                    Arguments = $"-c \"exec -a '{command}' '{executablePath}' {allArgs}\"",
                     UseShellExecute = false
                 };
 
