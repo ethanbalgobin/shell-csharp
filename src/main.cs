@@ -8,6 +8,8 @@ class Program
         "echo", "exit", "quit", "type", "pwd", "cd"
     };
 
+    static readonly string[] AutocompleteCommands = { "echo", "exit" };
+
     static void Main()
     {
         bool run = true;
@@ -16,7 +18,7 @@ class Program
         {
             Console.Write("$ ");
 
-            string? input = Console.ReadLine();
+            string? input = ReadLineWithTabCompletion();
             if (input is null) break;
 
             input = input.Trim();
@@ -128,7 +130,8 @@ class Program
 
                 Action action = cmd switch
                 {
-                    "" => () => { },
+                    "" => () => { }
+                    ,
                     "echo" => () => HandleEcho(args),
                     "type" => () => HandleType(args),
                     "exit" or "quit" => () => run = false,
@@ -154,6 +157,62 @@ class Program
                     stderrWriter?.Dispose();
                     stderrStream?.Dispose();
                 }
+            }
+        }
+    }
+
+    static string? ReadLineWithTabCompletion()
+    {
+        var input = new StringBuilder();
+        
+        while (true)
+        {
+            var keyInfo = Console.ReadKey(intercept: true);
+            
+            if (keyInfo.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return input.ToString();
+            }
+            else if (keyInfo.Key == ConsoleKey.Tab)
+            {
+                string currentInput = input.ToString();
+                
+                if (!currentInput.Contains(' '))
+                {
+                    var matches = AutocompleteCommands
+                        .Where(cmd => cmd.StartsWith(currentInput, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    
+                    if (matches.Count == 1)
+                    {
+                        Console.Write("\r$ ");
+                        
+                        Console.Write(new string(' ', input.Length));
+                        
+                        Console.Write("\r$ ");
+                        
+                        string completion = matches[0];
+                        input.Clear();
+                        input.Append(completion);
+                        input.Append(' ');
+                        
+                        Console.Write(completion + " ");
+                    }
+                }
+            }
+            else if (keyInfo.Key == ConsoleKey.Backspace)
+            {
+                if (input.Length > 0)
+                {
+                    input.Length--;
+                    Console.Write("\b \b");
+                }
+            }
+            else if (!char.IsControl(keyInfo.KeyChar))
+            {
+                input.Append(keyInfo.KeyChar);
+                Console.Write(keyInfo.KeyChar);
             }
         }
     }
