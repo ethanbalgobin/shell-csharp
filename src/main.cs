@@ -57,12 +57,29 @@ class Program
         {
             char c = input[i];
 
-            if (c == '\\' && !inSingleQuote && !inDoubleQuote)
+            if (c == '\\' && !inSingleQuote)
             {
                 if (i + 1 < input.Length)
                 {
-                    i++;
-                    currentArg.Append(input[i]);
+                    char nextChar = input[i + 1];
+                    
+                    if (inDoubleQuote)
+                    {
+                        if (nextChar == '"' || nextChar == '\\')
+                        {
+                            i++;
+                            currentArg.Append(nextChar);
+                        }
+                        else
+                        {
+                            currentArg.Append(c);
+                        }
+                    }
+                    else
+                    {
+                        i++;
+                        currentArg.Append(nextChar);
+                    }
                 }
                 else
                 {
@@ -198,13 +215,16 @@ class Program
             }
             else
             {
-                var escapedArgs = args.Select(arg => $"'{arg.Replace("'", "'\\''")}'");
-                var allArgs = string.Join(" ", escapedArgs);
-
+                var escapedCommand = EscapeShellArgument(command);
+                var escapedPath = EscapeShellArgument(executablePath);
+                var escapedArgs = string.Join(" ", args.Select(EscapeShellArgument));
+                
+                var shellCommand = $"exec -a {escapedCommand} {escapedPath} {escapedArgs}".TrimEnd();
+                
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = "/bin/sh",
-                    Arguments = $"-c \"exec -a '{command}' '{executablePath}' {allArgs}\"",
+                    ArgumentList = { "-c", shellCommand },
                     UseShellExecute = false
                 };
 
@@ -219,6 +239,16 @@ class Program
         {
             Console.WriteLine($"Error executing {command}: {ex.Message}");
         }
+    }
+
+    static string EscapeShellArgument(string arg)
+    {
+        if (string.IsNullOrEmpty(arg))
+        {
+            return "''";
+        }
+
+        return "'" + arg.Replace("'", "'\"'\"'") + "'";
     }
 
     static string? FindExecutableInPath(string commandName)
