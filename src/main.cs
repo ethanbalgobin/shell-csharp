@@ -27,28 +27,41 @@ class Program
                 continue;
             }
 
-            // Check for output redirection
-            string? redirectFile = null;
-            int redirectIndex = -1;
+            string? redirectStdout = null;
+            string? redirectStderr = null;
+            int stdoutIndex = -1;
+            int stderrIndex = -1;
 
             for (int i = 0; i < parsedArgs.Count; i++)
             {
                 if (parsedArgs[i] == ">" || parsedArgs[i] == "1>")
                 {
-                    redirectIndex = i;
+                    stdoutIndex = i;
                     if (i + 1 < parsedArgs.Count)
                     {
-                        redirectFile = parsedArgs[i + 1];
+                        redirectStdout = parsedArgs[i + 1];
                     }
-                    break;
+                }
+                else if (parsedArgs[i] == "2>")
+                {
+                    stderrIndex = i;
+                    if (i + 1 < parsedArgs.Count)
+                    {
+                        redirectStderr = parsedArgs[i + 1];
+                    }
                 }
             }
 
-            // Remove redirection operator and filename from args
-            List<string> actualArgs = parsedArgs;
-            if (redirectIndex >= 0)
+            List<string> actualArgs = new List<string>();
+            for (int i = 0; i < parsedArgs.Count; i++)
             {
-                actualArgs = parsedArgs.Take(redirectIndex).ToList();
+                if ((i == stdoutIndex || i == stderrIndex) ||
+                    (stdoutIndex >= 0 && i == stdoutIndex + 1) ||
+                    (stderrIndex >= 0 && i == stderrIndex + 1))
+                {
+                    continue;
+                }
+                actualArgs.Add(parsedArgs[i]);
             }
 
             if (actualArgs.Count == 0)
@@ -61,19 +74,32 @@ class Program
 
             bool isBuiltin = Builtins.Contains(cmd) || cmd == "exit" || cmd == "quit";
 
-            // Set up redirection if needed
             TextWriter? originalOut = null;
-            FileStream? fileStream = null;
-            StreamWriter? fileWriter = null;
+            TextWriter? originalErr = null;
+            FileStream? stdoutStream = null;
+            FileStream? stderrStream = null;
+            StreamWriter? stdoutWriter = null;
+            StreamWriter? stderrWriter = null;
 
             try
             {
-                if (redirectFile != null && isBuiltin)
+                if (isBuiltin)
                 {
-                    originalOut = Console.Out;
-                    fileStream = new FileStream(redirectFile, FileMode.Create, FileAccess.Write);
-                    fileWriter = new StreamWriter(fileStream) { AutoFlush = true };
-                    Console.SetOut(fileWriter);
+                    if (redirectStdout != null)
+                    {
+                        originalOut = Console.Out;
+                        stdoutStream = new FileStream(redirectStdout, FileMode.Create, FileAccess.Write);
+                        stdoutWriter = new StreamWriter(stdoutStream) { AutoFlush = true };
+                        Console.SetOut(stdoutWriter);
+                    }
+
+                    if (redirectStderr != null)
+                    {
+                        originalErr = Console.Error;
+                        stderrStream = new FileStream(redirectStderr, FileMode.Create, FileAccess.Write);
+                        stderrWriter = new StreamWriter(stderrStream) { AutoFlush = true };
+                        Console.SetError(stderrWriter);
+                    }
                 }
 
                 Action action = cmd switch
@@ -84,19 +110,25 @@ class Program
                     "exit" or "quit" => () => run = false,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
-                    _ => () => HandleExternalCommand(cmd, args, redirectFile)
+                    _ => () => HandleExternalCommand(cmd, args, redirectStdout, redirectStderr)
                 };
 
                 action();
             }
             finally
             {
-                // Restore original stdout
                 if (originalOut != null)
                 {
                     Console.SetOut(originalOut);
-                    fileWriter?.Dispose();
-                    fileStream?.Dispose();
+                    stdoutWriter?.Dispose();
+                    stdoutStream?.Dispose();
+                }
+
+                if (originalErr != null)
+                {
+                    Console.SetError(originalErr);
+                    stderrWriter?.Dispose();
+                    stderrStream?.Dispose();
                 }
             }
         }
@@ -228,17 +260,17 @@ class Program
         }
         catch (DirectoryNotFoundException)
         {
-            Console.WriteLine($"cd: {path}: No such file or directory");
+            Console.Error.WriteLine($"cd: {path}: No such file or directory");
         }
     }
 
-    static void HandleExternalCommand(string command, List<string> args, string? redirectFile = null)
+    static void HandleExternalCommand(string command, List<string> args, string? redirectStdout = null, string? redirectStderr = null)
     {
         string? executablePath = FindExecutableInPath(command);
 
         if (executablePath is null)
         {
-            Console.WriteLine($"{command}: command not found");
+            Console.Error.WriteLine($"{command}: command not found");
             return;
         }
 
@@ -250,7 +282,8 @@ class Program
                 {
                     FileName = executablePath,
                     UseShellExecute = false,
-                    RedirectStandardOutput = redirectFile != null
+                    RedirectStandardOutput = redirectStdout != null,
+                    RedirectStandardError = redirectStderr != null
                 };
 
                 foreach (var arg in args)
@@ -261,11 +294,18 @@ class Program
                 using var process = Process.Start(startInfo);
                 if (process is not null)
                 {
-                    if (redirectFile != null && process.StandardOutput != null)
+                    if (redirectStdout != null && process.StandardOutput != null)
                     {
                         string output = process.StandardOutput.ReadToEnd();
-                        File.WriteAllText(redirectFile, output);
+                        File.WriteAllText(redirectStdout, output);
                     }
+
+                    if (redirectStderr != null && process.StandardError != null)
+                    {
+                        string errorOutput = process.StandardError.ReadToEnd();
+                        File.WriteAllText(redirectStderr, errorOutput);
+                    }
+
                     process.WaitForExit();
                 }
             }
@@ -277,10 +317,16 @@ class Program
                 
                 var shellCommand = $"exec -a {escapedCommand} {escapedPath} {escapedArgs}".TrimEnd();
                 
-                if (redirectFile != null)
+                if (redirectStdout != null)
                 {
-                    var escapedRedirect = EscapeShellArgument(redirectFile);
+                    var escapedRedirect = EscapeShellArgument(redirectStdout);
                     shellCommand += $" > {escapedRedirect}";
+                }
+
+                if (redirectStderr != null)
+                {
+                    var escapedRedirect = EscapeShellArgument(redirectStderr);
+                    shellCommand += $" 2> {escapedRedirect}";
                 }
                 
                 var startInfo = new ProcessStartInfo
