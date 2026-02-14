@@ -1,3 +1,6 @@
+using System.Buffers;
+using System.Diagnostics;
+
 class Program
 {
     static readonly HashSet<string> Builtins = new(StringComparer.Ordinal)
@@ -28,7 +31,7 @@ class Program
                 "echo"             => () => HandleEcho(args),
                 "type"             => () => HandleType(args),
                 "exit" or "quit"   => () => run = false,
-                _                  => () => Console.WriteLine($"{cmd}: command not found")
+                _                  => () => HandleExternalCommand(cmd, args)
             };
 
             action();
@@ -63,6 +66,55 @@ class Program
         }
 
         Console.WriteLine($"{target}: not found");
+    }
+
+    static void HandleExternalCommand(string command, string arguments)
+    {
+        string? executablePath = FindExecutableInPath(command);
+
+        if (executablePath is null)
+        {
+            Console.WriteLine($"{command}: command not found");
+            return;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = arguments,
+                    UseShellExecute = false
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process is not null)
+                {
+                    process.WaitForExit();
+                }
+            }
+            else
+            {
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "/bin/sh",
+                    Arguments = $"-c \"exec -a '{command}' '{executablePath}' {arguments}\"",
+                    UseShellExecute = false
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process is not null)
+                {
+                    process.WaitForExit();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error executing {command}: {ex.Message}");
+        }
     }
 
     static string? FindExecutableInPath(string commandName)
