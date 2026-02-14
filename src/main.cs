@@ -29,6 +29,8 @@ class Program
 
             string? redirectStdout = null;
             string? redirectStderr = null;
+            bool appendStdout = false;
+            bool appendStderr = false;
             int stdoutIndex = -1;
             int stderrIndex = -1;
 
@@ -37,6 +39,16 @@ class Program
                 if (parsedArgs[i] == ">" || parsedArgs[i] == "1>")
                 {
                     stdoutIndex = i;
+                    appendStdout = false;
+                    if (i + 1 < parsedArgs.Count)
+                    {
+                        redirectStdout = parsedArgs[i + 1];
+                    }
+                }
+                else if (parsedArgs[i] == ">>" || parsedArgs[i] == "1>>")
+                {
+                    stdoutIndex = i;
+                    appendStdout = true;
                     if (i + 1 < parsedArgs.Count)
                     {
                         redirectStdout = parsedArgs[i + 1];
@@ -45,6 +57,16 @@ class Program
                 else if (parsedArgs[i] == "2>")
                 {
                     stderrIndex = i;
+                    appendStderr = false;
+                    if (i + 1 < parsedArgs.Count)
+                    {
+                        redirectStderr = parsedArgs[i + 1];
+                    }
+                }
+                else if (parsedArgs[i] == "2>>")
+                {
+                    stderrIndex = i;
+                    appendStderr = true;
                     if (i + 1 < parsedArgs.Count)
                     {
                         redirectStderr = parsedArgs[i + 1];
@@ -88,7 +110,8 @@ class Program
                     if (redirectStdout != null)
                     {
                         originalOut = Console.Out;
-                        stdoutStream = new FileStream(redirectStdout, FileMode.Create, FileAccess.Write);
+                        var fileMode = appendStdout ? FileMode.Append : FileMode.Create;
+                        stdoutStream = new FileStream(redirectStdout, fileMode, FileAccess.Write);
                         stdoutWriter = new StreamWriter(stdoutStream) { AutoFlush = true };
                         Console.SetOut(stdoutWriter);
                     }
@@ -96,7 +119,8 @@ class Program
                     if (redirectStderr != null)
                     {
                         originalErr = Console.Error;
-                        stderrStream = new FileStream(redirectStderr, FileMode.Create, FileAccess.Write);
+                        var fileMode = appendStderr ? FileMode.Append : FileMode.Create;
+                        stderrStream = new FileStream(redirectStderr, fileMode, FileAccess.Write);
                         stderrWriter = new StreamWriter(stderrStream) { AutoFlush = true };
                         Console.SetError(stderrWriter);
                     }
@@ -110,7 +134,7 @@ class Program
                     "exit" or "quit" => () => run = false,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
-                    _ => () => HandleExternalCommand(cmd, args, redirectStdout, redirectStderr)
+                    _ => () => HandleExternalCommand(cmd, args, redirectStdout, appendStdout, redirectStderr, appendStderr)
                 };
 
                 action();
@@ -264,7 +288,7 @@ class Program
         }
     }
 
-    static void HandleExternalCommand(string command, List<string> args, string? redirectStdout = null, string? redirectStderr = null)
+    static void HandleExternalCommand(string command, List<string> args, string? redirectStdout = null, bool appendStdout = false, string? redirectStderr = null, bool appendStderr = false)
     {
         string? executablePath = FindExecutableInPath(command);
 
@@ -297,13 +321,19 @@ class Program
                     if (redirectStdout != null && process.StandardOutput != null)
                     {
                         string output = process.StandardOutput.ReadToEnd();
-                        File.WriteAllText(redirectStdout, output);
+                        var fileMode = appendStdout ? FileMode.Append : FileMode.Create;
+                        using var fs = new FileStream(redirectStdout, fileMode, FileAccess.Write);
+                        using var writer = new StreamWriter(fs);
+                        writer.Write(output);
                     }
 
                     if (redirectStderr != null && process.StandardError != null)
                     {
                         string errorOutput = process.StandardError.ReadToEnd();
-                        File.WriteAllText(redirectStderr, errorOutput);
+                        var fileMode = appendStderr ? FileMode.Append : FileMode.Create;
+                        using var fs = new FileStream(redirectStderr, fileMode, FileAccess.Write);
+                        using var writer = new StreamWriter(fs);
+                        writer.Write(errorOutput);
                     }
 
                     process.WaitForExit();
@@ -320,13 +350,15 @@ class Program
                 if (redirectStdout != null)
                 {
                     var escapedRedirect = EscapeShellArgument(redirectStdout);
-                    shellCommand += $" > {escapedRedirect}";
+                    var operatorSymbol = appendStdout ? ">>" : ">";
+                    shellCommand += $" {operatorSymbol} {escapedRedirect}";
                 }
 
                 if (redirectStderr != null)
                 {
                     var escapedRedirect = EscapeShellArgument(redirectStderr);
-                    shellCommand += $" 2> {escapedRedirect}";
+                    var operatorSymbol = appendStderr ? "2>>" : "2>";
+                    shellCommand += $" {operatorSymbol} {escapedRedirect}";
                 }
                 
                 var startInfo = new ProcessStartInfo
