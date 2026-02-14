@@ -187,40 +187,55 @@ class Program
                     
                     if (allCompletions.Count == 1)
                     {
-                        // Move cursor to beginning of line (after prompt)
                         Console.Write("\r$ ");
                         
-                        // Clear the rest of the line
                         Console.Write(new string(' ', input.Length));
                         
-                        // Move back to beginning again
                         Console.Write("\r$ ");
                         
-                        // Complete the command
                         string completion = allCompletions[0];
                         input.Clear();
                         input.Append(completion);
                         input.Append(' '); // Add trailing space
                         
-                        // Write the completed command to console
                         Console.Write(completion + " ");
                         
                         lastKeyWasTab = false;
                     }
                     else if (allCompletions.Count > 1)
                     {
-                        if (lastKeyWasTab)
+                        string lcp = GetLongestCommonPrefix(allCompletions);
+                        
+                        if (lcp.Length > currentInput.Length)
                         {
-                            Console.WriteLine();
-                            Console.WriteLine(string.Join("  ", allCompletions));
-                            Console.Write("$ " + currentInput);
+                            Console.Write("\r$ ");
+                            
+                            Console.Write(new string(' ', input.Length));
+                            
+                            Console.Write("\r$ ");
+                            
+                            input.Clear();
+                            input.Append(lcp);
+                            
+                            Console.Write(lcp);
                             
                             lastKeyWasTab = false;
                         }
                         else
                         {
-                            Console.Write("\x07");
-                            lastKeyWasTab = true;
+                            if (lastKeyWasTab)
+                            {
+                                Console.WriteLine();
+                                Console.WriteLine(string.Join("  ", allCompletions));
+                                Console.Write("$ " + currentInput);
+                                
+                                lastKeyWasTab = false;
+                            }
+                            else
+                            {
+                                Console.Write("\x07");
+                                lastKeyWasTab = true;
+                            }
                         }
                     }
                     else
@@ -254,6 +269,34 @@ class Program
                 lastKeyWasTab = false;
             }
         }
+    }
+
+    static string GetLongestCommonPrefix(List<string> strings)
+    {
+        if (strings.Count == 0)
+            return "";
+        
+        if (strings.Count == 1)
+            return strings[0];
+        
+        string prefix = strings[0];
+        
+        for (int i = 1; i < strings.Count; i++)
+        {
+            int j = 0;
+            while (j < prefix.Length && j < strings[i].Length && 
+                   prefix[j] == strings[i][j])
+            {
+                j++;
+            }
+            
+            prefix = prefix.Substring(0, j);
+            
+            if (prefix.Length == 0)
+                break;
+        }
+        
+        return prefix;
     }
     
     static List<string> GetCompletionMatches(string prefix)
