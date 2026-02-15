@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 class Program
@@ -176,7 +177,7 @@ class Program
                     "exit" or "quit" => () => run = false,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
-                    "history" => () => HandleHistory(),
+                    "history" => () => HandleHistory(args.Count > 0 && int.TryParse(args[0], out int result) ? result : 0),
                     _ => () => HandleExternalCommand(cmd, args, redirectStdout, appendStdout, redirectStderr, appendStderr)
                 };
 
@@ -200,12 +201,23 @@ class Program
             }
         }
     }
-    
-    static void HandleHistory()
+
+    static void HandleHistory(int limit)
     {
-        for (int i = 0; i < _history.Count; i++)
+        if (limit <= 0)
         {
-            Console.WriteLine($"{i + 1,5} {_history[i]}");
+            for (int i = 0; i < _history.Count; i++)
+            {
+                Console.WriteLine($"{i + 1,5} {_history[i]}");
+            }
+        }
+        else
+        {
+            int startIndex = Math.Max(0, _history.Count - limit);
+            for (int i = startIndex; i < _history.Count; i++)
+            {
+                Console.WriteLine($"{i + 1,5}  {_history[i]}");
+            }
         }
     }
 
