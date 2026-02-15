@@ -1,6 +1,4 @@
-using System.Data.Common;
 using System.Diagnostics;
-using System.Runtime.Serialization;
 using System.Text;
 
 class Program
@@ -31,13 +29,39 @@ class Program
                 continue;
             }
 
-            int pipeIndex = parsedArgs.IndexOf("|");
-            if (pipeIndex > 0 && pipeIndex < parsedArgs.Count - 1)
+            var pipeIndices = new List<int>();
+            for (int i = 0; i < parsedArgs.Count; i++)
             {
-                var leftCommand = parsedArgs.Take(pipeIndex).ToList();
-                var rightCommand = parsedArgs.Skip(pipeIndex + 1).ToList();
-                HandlePipeline(leftCommand, rightCommand);
-                continue;
+                if (parsedArgs[i] == "|")
+                {
+                    pipeIndices.Add(i);
+                }
+            }
+
+            if (pipeIndices.Count > 0)
+            {
+                var stages = new List<List<string>>();
+                int start = 0;
+                
+                foreach (var pipeIdx in pipeIndices)
+                {
+                    if (pipeIdx > start)
+                    {
+                        stages.Add(parsedArgs.GetRange(start, pipeIdx - start));
+                    }
+                    start = pipeIdx + 1;
+                }
+                
+                if (start < parsedArgs.Count)
+                {
+                    stages.Add(parsedArgs.GetRange(start, parsedArgs.Count - start));
+                }
+
+                if (stages.Count > 0)
+                {
+                    HandleMultiStagePipeline(stages);
+                    continue;
+                }
             }
 
             string? redirectStdout = null;
@@ -141,8 +165,7 @@ class Program
 
                 Action action = cmd switch
                 {
-                    "" => () => { }
-                    ,
+                    "" => () => { },
                     "echo" => () => HandleEcho(args),
                     "type" => () => HandleType(args),
                     "exit" or "quit" => () => run = false,
@@ -171,352 +194,186 @@ class Program
             }
         }
     }
-    
-        static void HandlePipeline(List<string> leftCommand, List<string> rightCommand)
+
+    static void HandleMultiStagePipeline(List<List<string>> stages)
     {
-        if (leftCommand.Count == 0 || rightCommand.Count == 0)
+        if (stages.Count == 0)
             return;
-
-        string leftCmd = leftCommand[0];
-        var leftArgs = leftCommand.Skip(1).ToList();
-
-        string rightCmd = rightCommand[0];
-        var rightArgs = rightCommand.Skip(1).ToList();
-
-        bool leftIsBuiltin = Builtins.Contains(leftCmd.ToLowerInvariant());
-        bool rightIsBuiltin = Builtins.Contains(rightCmd.ToLowerInvariant());
 
         try
         {
-            if (leftIsBuiltin && rightIsBuiltin)
+            var commandInfo = new List<(string cmd, List<string> args, bool isBuiltin, string? execPath)>();
+            
+            foreach (var stage in stages)
             {
-                // Both are builtins - use in-memory pipe
-                using var memoryStream = new MemoryStream();
-                using var writer = new StreamWriter(memoryStream) { AutoFlush = true };
-                using var reader = new StreamReader(memoryStream);
-
-                // Execute left builtin, capturing output
-                var originalOut = Console.Out;
-                Console.SetOut(writer);
-                
-                // Reuse existing handlers
-                switch (leftCmd.ToLowerInvariant())
+                if (stage.Count == 0)
                 {
-                    case "echo": HandleEcho(leftArgs); break;
-                    case "type": HandleType(leftArgs); break;
-                    case "pwd": HandlePwd(); break;
-                    case "cd": HandleCd(string.Join(" ", leftArgs) ?? ""); break;
-                }
-                
-                Console.SetOut(originalOut);
-
-                // Reset stream position for reading
-                memoryStream.Position = 0;
-
-                // Execute right builtin, reading from captured output
-                var originalIn = Console.In;
-                Console.SetIn(reader);
-                
-                switch (rightCmd.ToLowerInvariant())
-                {
-                    case "echo": HandleEcho(rightArgs); break;
-                    case "type": HandleType(rightArgs); break;
-                    case "pwd": HandlePwd(); break;
-                    case "cd": HandleCd(string.Join(" ", rightArgs) ?? ""); break;
-                }
-                
-                Console.SetIn(originalIn);
-            }
-            else if (leftIsBuiltin && !rightIsBuiltin)
-            {
-                // Left is builtin, right is external
-                string? rightExec = FindExecutableInPath(rightCmd);
-                if (rightExec == null)
-                {
-                    Console.Error.WriteLine($"{rightCmd}: command not found");
+                    Console.Error.WriteLine("Empty pipeline stage");
                     return;
                 }
-
-                if (OperatingSystem.IsWindows())
+                
+                string cmd = stage[0];
+                var args = stage.Skip(1).ToList();
+                bool isBuiltin = Builtins.Contains(cmd.ToLowerInvariant());
+                string? execPath = null;
+                
+                if (!isBuiltin)
                 {
-                    using var memoryStream = new MemoryStream();
-                    using var writer = new StreamWriter(memoryStream) { AutoFlush = true };
-
-                    // Execute left builtin, capturing output
-                    var originalOut = Console.Out;
-                    Console.SetOut(writer);
-                    
-                    switch (leftCmd.ToLowerInvariant())
+                    execPath = FindExecutableInPath(cmd);
+                    if (execPath == null)
                     {
-                        case "echo": HandleEcho(leftArgs); break;
-                        case "type": HandleType(leftArgs); break;
-                        case "pwd": HandlePwd(); break;
-                        case "cd": HandleCd(string.Join(" ", leftArgs) ?? ""); break;
-                    }
-                    
-                    Console.SetOut(originalOut);
-
-                    // Reset stream for reading
-                    memoryStream.Position = 0;
-
-                    // Start right external process
-                    var rightStartInfo = new ProcessStartInfo
-                    {
-                        FileName = rightExec,
-                        UseShellExecute = false,
-                        RedirectStandardInput = true,
-                    };
-
-                    foreach (var arg in rightArgs)
-                        rightStartInfo.ArgumentList.Add(arg);
-
-                    using var rightProcess = Process.Start(rightStartInfo);
-                    if (rightProcess != null)
-                    {
-                        memoryStream.CopyTo(rightProcess.StandardInput.BaseStream);
-                        rightProcess.StandardInput.Close();
-                        rightProcess.WaitForExit();
+                        Console.Error.WriteLine($"{cmd}: command not found");
+                        return;
                     }
                 }
-                else
-                {
-                    // Use temporary file for builtin output
-                    var tempFile = Path.GetTempFileName();
-                    try
-                    {
-                        using (var fileStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write))
-                        using (var writer = new StreamWriter(fileStream) { AutoFlush = true })
-                        {
-                            var originalOut = Console.Out;
-                            Console.SetOut(writer);
-                            
-                            switch (leftCmd.ToLowerInvariant())
-                            {
-                                case "echo": HandleEcho(leftArgs); break;
-                                case "type": HandleType(leftArgs); break;
-                                case "pwd": HandlePwd(); break;
-                                case "cd": HandleCd(string.Join(" ", leftArgs) ?? ""); break;
-                            }
-                            
-                            Console.SetOut(originalOut);
-                        }
-
-                        // Execute right command with temp file as input
-                        var escapedRightCmd = EscapeShellArgument(rightCmd);
-                        var escapedRightPath = EscapeShellArgument(rightExec);
-                        var escapedRightArgs = string.Join(" ", rightArgs.Select(EscapeShellArgument));
-                        var escapedTempFile = EscapeShellArgument(tempFile);
-
-                        var shellCommand = $"exec -a {escapedRightCmd} {escapedRightPath} {escapedRightArgs} < {escapedTempFile}".TrimEnd();
-
-                        var startInfo = new ProcessStartInfo
-                        {
-                            FileName = "/bin/sh",
-                            ArgumentList = { "-c", shellCommand },
-                            UseShellExecute = false
-                        };
-
-                        using var process = Process.Start(startInfo);
-                        if (process != null)
-                        {
-                            process.WaitForExit();
-                        }
-                    }
-                    finally
-                    {
-                        if (File.Exists(tempFile))
-                            File.Delete(tempFile);
-                    }
-                }
+                
+                commandInfo.Add((cmd, args, isBuiltin, execPath));
             }
-            else if (!leftIsBuiltin && rightIsBuiltin)
+
+            if (!OperatingSystem.IsWindows() && commandInfo.All(c => !c.isBuiltin))
             {
-                // Left is external, right is builtin
-                string? leftExec = FindExecutableInPath(leftCmd);
-                if (leftExec == null)
+                var pipelineParts = new List<string>();
+                
+                foreach (var (cmd, args, _, execPath) in commandInfo)
                 {
-                    Console.Error.WriteLine($"{leftCmd}: command not found");
-                    return;
+                    var escapedCmd = EscapeShellArgument(cmd);
+                    var escapedPath = EscapeShellArgument(execPath!);
+                    var escapedArgs = string.Join(" ", args.Select(EscapeShellArgument));
+                    
+                    var part = $"exec -a {escapedCmd} {escapedPath} {escapedArgs}".TrimEnd();
+                    pipelineParts.Add(part);
                 }
-
-                if (OperatingSystem.IsWindows())
+                
+                var pipelineCommand = string.Join(" | ", pipelineParts);
+                
+                var startInfo = new ProcessStartInfo
                 {
-                    var leftStartInfo = new ProcessStartInfo
-                    {
-                        FileName = leftExec,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                    };
+                    FileName = "/bin/sh",
+                    ArgumentList = { "-c", pipelineCommand },
+                    UseShellExecute = false
+                };
 
-                    foreach (var arg in leftArgs)
-                        leftStartInfo.ArgumentList.Add(arg);
-
-                    using var leftProcess = Process.Start(leftStartInfo);
-                    if (leftProcess != null)
-                    {
-                        // Read left output into memory
-                        using var memoryStream = new MemoryStream();
-                        leftProcess.StandardOutput.BaseStream.CopyTo(memoryStream);
-                        leftProcess.WaitForExit();
-
-                        // Reset stream for reading
-                        memoryStream.Position = 0;
-                        using var reader = new StreamReader(memoryStream);
-
-                        // Execute right builtin with captured input
-                        var originalIn = Console.In;
-                        Console.SetIn(reader);
-                        
-                        switch (rightCmd.ToLowerInvariant())
-                        {
-                            case "echo": HandleEcho(rightArgs); break;
-                            case "type": HandleType(rightArgs); break;
-                            case "pwd": HandlePwd(); break;
-                            case "cd": HandleCd(string.Join(" ", rightArgs) ?? ""); break;
-                        }
-                        
-                        Console.SetIn(originalIn);
-                    }
-                }
-                else
+                using var process = Process.Start(startInfo);
+                if (process != null)
                 {
-                    // Use temporary file for external output
-                    var tempFile = Path.GetTempFileName();
-                    try
-                    {
-                        // Execute left command, redirecting to temp file
-                        var escapedLeftCmd = EscapeShellArgument(leftCmd);
-                        var escapedLeftPath = EscapeShellArgument(leftExec);
-                        var escapedLeftArgs = string.Join(" ", leftArgs.Select(EscapeShellArgument));
-                        var escapedTempFile = EscapeShellArgument(tempFile);
-
-                        var shellCommand = $"exec -a {escapedLeftCmd} {escapedLeftPath} {escapedLeftArgs} > {escapedTempFile}".TrimEnd();
-
-                        var startInfo = new ProcessStartInfo
-                        {
-                            FileName = "/bin/sh",
-                            ArgumentList = { "-c", shellCommand },
-                            UseShellExecute = false
-                        };
-
-                        using (var process = Process.Start(startInfo))
-                        {
-                            if (process != null)
-                            {
-                                process.WaitForExit();
-                            }
-                        }
-
-                        // Now execute builtin with temp file as input
-                        using var fileStream = new FileStream(tempFile, FileMode.Open, FileAccess.Read);
-                        using var reader = new StreamReader(fileStream);
-
-                        var originalIn = Console.In;
-                        Console.SetIn(reader);
-                        
-                        switch (rightCmd.ToLowerInvariant())
-                        {
-                            case "echo": HandleEcho(rightArgs); break;
-                            case "type": HandleType(rightArgs); break;
-                            case "pwd": HandlePwd(); break;
-                            case "cd": HandleCd(string.Join(" ", rightArgs) ?? ""); break;
-                        }
-                        
-                        Console.SetIn(originalIn);
-                    }
-                    finally
-                    {
-                        if (File.Exists(tempFile))
-                            File.Delete(tempFile);
-                    }
+                    process.WaitForExit();
                 }
             }
             else
             {
-                // Both are external - existing implementation
-                string? leftExec = FindExecutableInPath(leftCmd);
-                string? rightExec = FindExecutableInPath(rightCmd);
-
-                if (leftExec == null)
-                {
-                    Console.Error.WriteLine($"{leftCmd}: command not found");
-                    return;
-                }
-
-                if (rightExec == null)
-                {
-                    Console.Error.WriteLine($"{rightCmd}: command not found");
-                    return;
-                }
-
-                if (OperatingSystem.IsWindows())
-                {
-                    var leftStartInfo = new ProcessStartInfo
-                    {
-                        FileName = leftExec,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                    };
-
-                    foreach (var arg in leftArgs)
-                        leftStartInfo.ArgumentList.Add(arg);
-
-                    var rightStartInfo = new ProcessStartInfo
-                    {
-                        FileName = rightExec,
-                        UseShellExecute = false,
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = false,
-                    };
-
-                    foreach (var arg in rightArgs)
-                        rightStartInfo.ArgumentList.Add(arg);
-
-                    using var leftProcess = Process.Start(leftStartInfo);
-                    using var rightProcess = Process.Start(rightStartInfo);
-
-                    if (leftProcess != null && rightProcess != null)
-                    {
-                        leftProcess.StandardOutput.BaseStream.CopyToAsync(rightProcess.StandardInput.BaseStream);
-
-                        leftProcess.WaitForExit();
-                        rightProcess.StandardInput.Close();
-                        rightProcess.WaitForExit();
-                    }
-                }
-                else
-                {
-                    var escapedLeftCmd = EscapeShellArgument(leftCmd);
-                    var escapedLeftPath = EscapeShellArgument(leftExec);
-                    var escapedLeftArgs = string.Join(" ", leftArgs.Select(EscapeShellArgument));
-
-                    var escapedRightCmd = EscapeShellArgument(rightCmd);
-                    var escapedRightPath = EscapeShellArgument(rightExec);
-                    var escapedRightArgs = string.Join(" ", rightArgs.Select(EscapeShellArgument));
-
-                    var leftPart = $"exec -a {escapedLeftCmd} {escapedLeftPath} {escapedLeftArgs}".TrimEnd();
-                    var rightPart = $"exec -a {escapedRightCmd} {escapedRightPath} {escapedRightArgs}".TrimEnd();
-
-                    var pipelineCommand = $"{leftPart} | {rightPart}";
-
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = "/bin/sh",
-                        ArgumentList = { "-c", pipelineCommand },
-                        UseShellExecute = false
-                    };
-
-                    using var process = Process.Start(startInfo);
-                    if (process != null)
-                    {
-                        process.WaitForExit();
-                    }
-                }
+                HandleMultiStagePipelineWithBuiltins(commandInfo);
             }
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error executing pipeline: {ex.Message}");
+        }
+    }
+
+    static void HandleMultiStagePipelineWithBuiltins(List<(string cmd, List<string> args, bool isBuiltin, string? execPath)> commandInfo)
+    {
+        var streams = new List<MemoryStream>();
+        
+        try
+        {
+            Stream? currentInput = null;
+            
+            for (int i = 0; i < commandInfo.Count; i++)
+            {
+                var (cmd, args, isBuiltin, execPath) = commandInfo[i];
+                bool isLastStage = (i == commandInfo.Count - 1);
+                
+                MemoryStream? outputStream = null;
+                if (!isLastStage)
+                {
+                    outputStream = new MemoryStream();
+                    streams.Add(outputStream);
+                }
+                
+                if (isBuiltin)
+                {
+                    TextReader? originalIn = null;
+                    TextWriter? originalOut = null;
+                    
+                    try
+                    {
+                        if (currentInput != null)
+                        {
+                            currentInput.Position = 0;
+                            var reader = new StreamReader(currentInput);
+                            originalIn = Console.In;
+                            Console.SetIn(reader);
+                        }
+                        
+                        if (outputStream != null)
+                        {
+                            var writer = new StreamWriter(outputStream) { AutoFlush = true };
+                            originalOut = Console.Out;
+                            Console.SetOut(writer);
+                        }
+                        
+                        switch (cmd.ToLowerInvariant())
+                        {
+                            case "echo": HandleEcho(args); break;
+                            case "type": HandleType(args); break;
+                            case "pwd": HandlePwd(); break;
+                            case "cd": HandleCd(string.Join(" ", args) ?? ""); break;
+                        }
+                        
+                        if (originalOut != null)
+                        {
+                            Console.Out.Flush();
+                        }
+                    }
+                    finally
+                    {
+                        if (originalIn != null)
+                            Console.SetIn(originalIn);
+                        if (originalOut != null)
+                            Console.SetOut(originalOut);
+                    }
+                }
+                else
+                {
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = execPath!,
+                        UseShellExecute = false,
+                        RedirectStandardInput = currentInput != null,
+                        RedirectStandardOutput = outputStream != null
+                    };
+                    
+                    foreach (var arg in args)
+                        startInfo.ArgumentList.Add(arg);
+                    
+                    using var process = Process.Start(startInfo);
+                    if (process != null)
+                    {
+                        if (currentInput != null && process.StandardInput != null)
+                        {
+                            currentInput.Position = 0;
+                            currentInput.CopyTo(process.StandardInput.BaseStream);
+                            process.StandardInput.Close();
+                        }
+                        
+                        if (outputStream != null && process.StandardOutput != null)
+                        {
+                            process.StandardOutput.BaseStream.CopyTo(outputStream);
+                        }
+                        
+                        process.WaitForExit();
+                    }
+                }
+                
+                currentInput = outputStream;
+            }
+        }
+        finally
+        {
+            foreach (var stream in streams)
+            {
+                stream?.Dispose();
+            }
         }
     }
 
@@ -545,15 +402,13 @@ class Program
                     if (allCompletions.Count == 1)
                     {
                         Console.Write("\r$ ");
-                        
                         Console.Write(new string(' ', input.Length));
-                        
                         Console.Write("\r$ ");
                         
                         string completion = allCompletions[0];
                         input.Clear();
                         input.Append(completion);
-                        input.Append(' '); // Add trailing space
+                        input.Append(' ');
                         
                         Console.Write(completion + " ");
                         
@@ -566,9 +421,7 @@ class Program
                         if (lcp.Length > currentInput.Length)
                         {
                             Console.Write("\r$ ");
-                            
                             Console.Write(new string(' ', input.Length));
-                            
                             Console.Write("\r$ ");
                             
                             input.Clear();
@@ -706,7 +559,6 @@ class Program
                             }
                             else
                             {
-                                // on unix - return the filename as is
                                 matches.Add(fileName);
                             }
                         }
@@ -714,7 +566,6 @@ class Program
                 }
                 catch
                 {
-                    // ignore errors reading directory
                     continue;
                 }
             }
