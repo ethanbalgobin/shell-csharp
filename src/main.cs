@@ -176,6 +176,7 @@ class Program
                     "exit" or "quit" => () => run = false,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
+                    "history" => () => HandleHistory(),
                     _ => () => HandleExternalCommand(cmd, args, redirectStdout, appendStdout, redirectStderr, appendStderr)
                 };
 
