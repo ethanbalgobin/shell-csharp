@@ -451,7 +451,7 @@ class Program
 
                     Console.Write("\r$ ");
                     Console.Write(new string(' ', input.Length));
-                    Console.Write("\r$");
+                    Console.Write("\r$ ");
 
                     input.Clear();
                     if (historyIndex < _history.Count)
