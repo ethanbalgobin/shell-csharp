@@ -5,10 +5,12 @@ class Program
 {
     static readonly HashSet<string> Builtins = new(StringComparer.Ordinal)
     {
-        "echo", "exit", "quit", "type", "pwd", "cd"
+        "echo", "exit", "quit", "type", "pwd", "cd", "history"
     };
 
     static readonly string[] AutocompleteCommands = { "echo", "exit" };
+
+    private static readonly List<string> _history = new();
 
     static void Main()
     {
@@ -19,9 +21,11 @@ class Program
             Console.Write("$ ");
 
             string? input = ReadLineWithTabCompletion();
-            if (input is null) break;
+            if (string.IsNullOrWhiteSpace(input)) break;
 
             input = input.Trim();
+
+            _history.Add(input);
 
             var parsedArgs = ParseCommand(input);
             if (parsedArgs.Count == 0)
@@ -42,7 +46,7 @@ class Program
             {
                 var stages = new List<List<string>>();
                 int start = 0;
-                
+
                 foreach (var pipeIdx in pipeIndices)
                 {
                     if (pipeIdx > start)
@@ -51,7 +55,7 @@ class Program
                     }
                     start = pipeIdx + 1;
                 }
-                
+
                 if (start < parsedArgs.Count)
                 {
                     stages.Add(parsedArgs.GetRange(start, parsedArgs.Count - start));
@@ -165,7 +169,8 @@ class Program
 
                 Action action = cmd switch
                 {
-                    "" => () => { },
+                    "" => () => { }
+                    ,
                     "echo" => () => HandleEcho(args),
                     "type" => () => HandleType(args),
                     "exit" or "quit" => () => run = false,
@@ -192,6 +197,14 @@ class Program
                     stderrStream?.Dispose();
                 }
             }
+        }
+    }
+    
+    static void HandleHistory()
+    {
+        for (int i = 0; i < _history.Count; i++)
+        {
+            Console.WriteLine($"{i + 1,5} {_history[i]}");
         }
     }
 
