@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization;
 using System.Text;
 
 class Program
@@ -26,13 +27,14 @@ class Program
 
             input = input.Trim();
 
-            _history.Add(input);
 
             var parsedArgs = ParseCommand(input);
             if (parsedArgs.Count == 0)
             {
                 continue;
             }
+            
+            _history.Add(input);
 
             var pipeIndices = new List<int>();
             for (int i = 0; i < parsedArgs.Count; i++)
@@ -407,54 +409,103 @@ class Program
     {
         var input = new StringBuilder();
         bool lastKeyWasTab = false;
+        int historyIndex = _history.Count;
+        string currentTypedInput = "";
         
         while (true)
         {
             var keyInfo = Console.ReadKey(intercept: true);
-            
+
             if (keyInfo.Key == ConsoleKey.Enter)
             {
                 Console.WriteLine();
                 return input.ToString();
             }
+            else if (keyInfo.Key == ConsoleKey.UpArrow)
+            {
+                if (historyIndex > 0)
+                {
+                    if (historyIndex == _history.Count)
+                    {
+                        currentTypedInput = input.ToString();
+                    }
+
+                    historyIndex--;
+
+                    Console.Write("\r$ ");
+                    Console.Write(new string(' ', input.Length));
+                    Console.Write("\r$ ");
+
+                    input.Clear();
+                    input.Append(_history[historyIndex]);
+                    Console.Write(_history[historyIndex]);
+                }
+
+                lastKeyWasTab = false;
+            }
+            else if (keyInfo.Key == ConsoleKey.DownArrow)
+            {
+                if (historyIndex < _history.Count)
+                {
+                    historyIndex++;
+
+                    Console.Write("\r$ ");
+                    Console.Write(new string(' ', input.Length));
+                    Console.Write("\r$");
+
+                    input.Clear();
+                    if (historyIndex < _history.Count)
+                    {
+                        input.Append(_history[historyIndex]);
+                        Console.Write(_history[historyIndex]);
+                    }
+                    else
+                    {
+                        input.Append(currentTypedInput);
+                        Console.Write(currentTypedInput);
+                    }
+                }
+
+                lastKeyWasTab = false;
+            }
             else if (keyInfo.Key == ConsoleKey.Tab)
             {
                 string currentInput = input.ToString();
-                
+
                 if (!currentInput.Contains(' '))
                 {
                     var allCompletions = GetCompletionMatches(currentInput);
-                    
+
                     if (allCompletions.Count == 1)
                     {
                         Console.Write("\r$ ");
                         Console.Write(new string(' ', input.Length));
                         Console.Write("\r$ ");
-                        
+
                         string completion = allCompletions[0];
                         input.Clear();
                         input.Append(completion);
                         input.Append(' ');
-                        
+
                         Console.Write(completion + " ");
-                        
+
                         lastKeyWasTab = false;
                     }
                     else if (allCompletions.Count > 1)
                     {
                         string lcp = GetLongestCommonPrefix(allCompletions);
-                        
+
                         if (lcp.Length > currentInput.Length)
                         {
                             Console.Write("\r$ ");
                             Console.Write(new string(' ', input.Length));
                             Console.Write("\r$ ");
-                            
+
                             input.Clear();
                             input.Append(lcp);
-                            
+
                             Console.Write(lcp);
-                            
+
                             lastKeyWasTab = false;
                         }
                         else
@@ -464,7 +515,7 @@ class Program
                                 Console.WriteLine();
                                 Console.WriteLine(string.Join("  ", allCompletions));
                                 Console.Write("$ " + currentInput);
-                                
+
                                 lastKeyWasTab = false;
                             }
                             else
