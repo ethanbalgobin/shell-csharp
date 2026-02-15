@@ -31,6 +31,15 @@ class Program
                 continue;
             }
 
+            int pipeIndex = parsedArgs.IndexOf("|");
+            if (pipeIndex > 0 && pipeIndex < parsedArgs.Count - 1)
+            {
+                var leftCommand = parsedArgs.Take(pipeIndex).ToList();
+                var rightCommand = parsedArgs.Skip(pipeIndex + 1).ToList();
+                HandlePipeline(leftCommand, rightCommand);
+                continue;
+            }
+
             string? redirectStdout = null;
             string? redirectStderr = null;
             bool appendStdout = false;
@@ -160,6 +169,106 @@ class Program
                     stderrStream?.Dispose();
                 }
             }
+        }
+    }
+    
+    static void HandlePipeline(List<string> leftCommand, List<string> rightCommand)
+    {
+        if (leftCommand.Count == 0 || rightCommand.Count == 0)
+            return;
+
+        string leftCmd = leftCommand[0];
+        var leftArgs = leftCommand.Skip(1).ToList();
+
+        string rightCmd = rightCommand[0];
+        var rightArgs = rightCommand.Skip(1).ToList();
+
+        string? leftExec = FindExecutableInPath(leftCmd);
+        string? rightExec = FindExecutableInPath(rightCmd);
+
+        if (leftExec == null)
+        {
+            Console.Error.WriteLine($"{leftCmd}: command not found");
+            return;
+        }
+
+        if (rightExec == null)
+        {
+            Console.Error.WriteLine($"{rightExec}: command not found");
+            return;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // Windows implementation using process
+                var leftStartInfo = new ProcessStartInfo
+                {
+                    FileName = leftExec,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                };
+
+                foreach (var arg in leftArgs)
+                    leftStartInfo.ArgumentList.Add(arg);
+
+                var rightStartInfo = new ProcessStartInfo
+                {
+                    FileName = rightExec,
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = false,
+                };
+
+                foreach (var arg in rightArgs)
+                    rightStartInfo.ArgumentList.Add(arg);
+
+                using var leftProcess = Process.Start(leftStartInfo);
+                using var rightProcess = Process.Start(rightStartInfo);
+
+                if (leftProcess != null && rightProcess != null)
+                {
+                    leftProcess.StandardOutput.BaseStream.CopyToAsync(rightProcess.StandardInput.BaseStream);
+
+                    leftProcess.WaitForExit();
+                    rightProcess.StandardInput.Close();
+                    rightProcess.WaitForExit();
+                }
+            }
+            else
+            {
+                // Unix implementation using shell
+                var escapedLeftCmd = EscapeShellArgument(leftCmd);
+                var escapedLeftPath = EscapeShellArgument(leftExec);
+                var escapedLeftArgs = string.Join(" ", leftArgs.Select(EscapeShellArgument));
+
+                var escapedRightCmd = EscapeShellArgument(rightCmd);
+                var escapedRightPath = EscapeShellArgument(rightExec);
+                var escapedRightArgs = string.Join(" ", rightArgs.Select(EscapeShellArgument));
+
+                var leftPart = $"exec -a {escapedLeftCmd} {escapedLeftPath} {escapedLeftArgs}".TrimEnd();
+                var rightPart = $"exec -a {escapedRightCmd} {escapedRightPath} {escapedRightArgs}".TrimEnd();
+
+                var pipelineCommand = $"{leftPart} | {rightPart}";
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "/bin/sh",
+                    ArgumentList = { "-c", pipelineCommand },
+                    UseShellExecute = false
+                };
+
+                using var process = Process.Start(startInfo);
+                if (process != null)
+                {
+                    process.WaitForExit();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error executing pipeline: {ex.Message}");
         }
     }
 
