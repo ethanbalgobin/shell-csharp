@@ -17,6 +17,22 @@ class Program
 
     static void Main()
     {
+        string? historyFilePath = Environment.GetEnvironmentVariable("HISTFILE");
+
+        if (historyFilePath is not null)
+        {
+            using (var fileReader = new StreamReader(historyFilePath))
+            {
+                string? line = fileReader.ReadLine();
+
+                while (line is not null)
+                {
+                    _history.Add(line);
+                    line = fileReader.ReadLine();
+                }
+            }
+        }
+
         bool run = true;
 
         while (run)
