@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -12,6 +13,7 @@ class Program
     static readonly string[] AutocompleteCommands = { "echo", "exit" };
 
     private static readonly List<string> _history = new();
+    private static int _lastSavedHistoryCount = 0;
 
     static void Main()
     {
@@ -239,7 +241,7 @@ class Program
         else if (args.Count >= 2 && args[0] == "-w")
         {
             string filePath = args[1];
-            
+
             try
             {
                 using (var writer = new StreamWriter(filePath, false))
@@ -249,6 +251,31 @@ class Program
                         writer.WriteLine(_history[i]);
                     }
                 }
+
+                _lastSavedHistoryCount = _history.Count;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"history: {filePath}: {ex.Message}");
+            }
+
+            return;
+        }
+        else if (args.Count >= 2 && args[0] == "-a")
+        {
+            string filePath = args[1];
+
+            try
+            {
+                using (var writer = new StreamWriter(filePath, append: true))
+                {
+                    for (int i = _lastSavedHistoryCount; i < _history.Count; i++)
+                    {
+                        writer.WriteLine(_history[i]);
+                    }
+                }
+
+                _lastSavedHistoryCount = _history.Count;
             }
             catch (Exception ex)
             {
