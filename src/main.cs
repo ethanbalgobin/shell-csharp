@@ -50,7 +50,7 @@ class Program
             {
                 continue;
             }
-            
+
             _history.Add(input);
 
             var pipeIndices = new List<int>();
@@ -193,7 +193,12 @@ class Program
                     ,
                     "echo" => () => HandleEcho(args),
                     "type" => () => HandleType(args),
-                    "exit" or "quit" => () => run = false,
+                    "exit" or "quit" => () =>
+                    {
+                        HandleExit(historyFilePath);
+                        run = false;
+                    }
+                    ,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
                     "history" => () => HandleHistory(args),
@@ -219,6 +224,22 @@ class Program
                 }
             }
         }
+    }
+
+    static void HandleExit(string? historyFilePath)
+    {
+        if (_history.Count > 0 && historyFilePath is not null)
+        {
+            using (var writer = new StreamWriter(historyFilePath, false))
+            {
+                for (int i = 0; i < _history.Count; i++)
+                {
+                    writer.WriteLine(_history[i]);
+                }
+            }
+        }
+        
+        return;
     }
 
     static void HandleHistory(List<string> args)
