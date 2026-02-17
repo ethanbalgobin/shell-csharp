@@ -203,18 +203,18 @@ class Program
         }
     }
 
-        static void HandleHistory(List<string> args)
+    static void HandleHistory(List<string> args)
     {
         if (args.Count >= 2 && args[0] == "-r")
         {
             string filePath = args[1];
-            
+
             try
             {
                 if (File.Exists(filePath))
                 {
                     var lines = File.ReadAllLines(filePath);
-                    
+
                     foreach (var line in lines)
                     {
                         // Skip empty lines
@@ -233,7 +233,28 @@ class Program
             {
                 Console.Error.WriteLine($"history: {filePath}: {ex.Message}");
             }
+
+            return;
+        }
+        else if (args.Count >= 2 && args[0] == "-w")
+        {
+            string filePath = args[1];
             
+            try
+            {
+                using (var writer = new StreamWriter(filePath, false))
+                {
+                    for (int i = 0; i < _history.Count; i++)
+                    {
+                        writer.WriteLine(_history[i]);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"history: {filePath}: {ex.Message}");
+            }
+
             return;
         }
         
