@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Runtime.Serialization;
 using System.Text;
 
 class Program
@@ -179,7 +178,7 @@ class Program
                     "exit" or "quit" => () => run = false,
                     "pwd" => () => HandlePwd(),
                     "cd" => () => HandleCd(string.Join(" ", args) ?? ""),
-                    "history" => () => HandleHistory(args.Count > 0 && int.TryParse(args[0], out int result) ? result : 0),
+                    "history" => () => HandleHistory(args),
                     _ => () => HandleExternalCommand(cmd, args, redirectStdout, appendStdout, redirectStderr, appendStderr)
                 };
 
@@ -204,13 +203,51 @@ class Program
         }
     }
 
-    static void HandleHistory(int limit)
+        static void HandleHistory(List<string> args)
     {
+        if (args.Count >= 2 && args[0] == "-r")
+        {
+            string filePath = args[1];
+            
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    var lines = File.ReadAllLines(filePath);
+                    
+                    foreach (var line in lines)
+                    {
+                        // Skip empty lines
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            _history.Add(line);
+                        }
+                    }
+                }
+                else
+                {
+                    Console.Error.WriteLine($"history: {filePath}: No such file or directory");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"history: {filePath}: {ex.Message}");
+            }
+            
+            return;
+        }
+        
+        int limit = 0;
+        if (args.Count > 0 && int.TryParse(args[0], out int result))
+        {
+            limit = result;
+        }
+        
         if (limit <= 0)
         {
             for (int i = 0; i < _history.Count; i++)
             {
-                Console.WriteLine($"{i + 1,5} {_history[i]}");
+                Console.WriteLine($"{i + 1,5}  {_history[i]}");
             }
         }
         else
@@ -346,6 +383,7 @@ class Program
                             case "type": HandleType(args); break;
                             case "pwd": HandlePwd(); break;
                             case "cd": HandleCd(string.Join(" ", args) ?? ""); break;
+                            case "history": HandleHistory(args); break;
                         }
                         
                         if (originalOut != null)
